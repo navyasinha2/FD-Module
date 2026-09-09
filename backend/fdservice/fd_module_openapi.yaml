@@ -1,0 +1,631 @@
+openapi: 3.0.3
+info:
+  title: Fixed Deposit (FD) Account Module API
+  description: >
+    REST API for the Fixed Deposit Account Module (Group 3), Banking Technology
+    Lab (CSF 3142). Owns fd_db (MSSQL). Covers account lifecycle, transactions,
+    interest, early withdrawal, maturity/renewal, receipts, reporting, and
+    batch-job triggers. See fd_module_api_justification.md for the
+    action-to-endpoint mapping and the rationale for what was excluded.
+  version: "1.0.0"
+  contact:
+    name: Group 3 — Fixed Deposit Module
+servers:
+  - url: https://api.banklab.local/fd/v1
+    description: FD module base path (behind API gateway; gateway resolves JWT -> CUST_ID)
+
+tags:
+  - name: Accounts
+    description: FD account creation, lookup, and lifecycle
+  - name: Transactions
+    description: Ledger entries against FD accounts
+  - name: Interest
+    description: Interest preview / calculation
+  - name: Maturity
+    description: Maturity payout and renewal
+  - name: Receipts
+    description: Term deposit receipt generation
+  - name: Reports
+    description: Reporting endpoints (report-service, reads fd_db directly)
+  - name: Batch
+    description: Admin-triggered batch job runs (accrual, maturity)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /fd-accounts:
+    post:
+      tags: [Accounts]
+      summary: Create FD account (Actions 1,2,3,4,5,6 — single atomic operation)
+      description: >
+        Creates a new FD account with its initial deposit transaction and at
+        least one account role (owner), in one atomic write. Account number
+        and account identifier are generated server-side. Maturity date is
+        computed from open date + tenure at creation time and never
+        recalculated. Terms (rate, interestType, compoundingFrequency) are
+        snapshotted from the Product & Pricing module and never re-fetched.
+      operationId: createFdAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFdAccountRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FdAccount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Product, rate, or customer-category mapping not found
+        '409':
+          description: >
+            Role cardinality violation (e.g. more than one GUARANTOR/GUARDIAN
+            for this account)
+        '422':
+          description: >
+            Customer→category mapping unresolved (open item — blocks
+            creation per Action 3 note)
+
+    get:
+      tags: [Accounts]
+      summary: Search accounts (Action 7)
+      operationId: searchFdAccounts
+      parameters:
+        - name: custId
+          in: query
+          schema: { type: string }
+          description: Filter by owning customer (via FD_ACCOUNT_ROLES, role=CUSTOMER/OWNER)
+        - name: acctNum
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, MATURED_CLOSED, MATURED_RENEWED, CLOSED]
+        - name: productCode
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Paged list of matching accounts (role-scoped — a CUSTOMER-role
+            caller only sees accounts they hold a role on)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items: { $ref: '#/components/schemas/FdAccountSummary' }
+                  totalElements: { type: integer }
+                  page: { type: integer }
+                  size: { type: integer }
+
+  /fd-accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: View account details (Action 8)
+      description: >
+        Includes FDA_ACCRUED_INT_AMT (interest accrued but not yet
+        capitalized). Response projection is role-based — audit fields are
+        excluded for CUSTOMER-role callers.
+      operationId: getFdAccount
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Account detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FdAccount'
+        '403':
+          description: Caller has no role on this account
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fd-accounts/{accountId}/roles:
+    post:
+      tags: [Accounts]
+      summary: Assign role to account (Action 6)
+      description: >
+        Adds a joint holder, nominee, guarantor, guardian, or beneficiary to
+        an existing account. Nominee is a role type value, not a distinct
+        entity. No percentage-share field (dropped from schema). Cardinality
+        caps (GUARANTOR/GUARDIAN: one each; BENEFICIARY: unlimited) are
+        enforced by a filtered unique index and surfaced here as 409.
+      operationId: assignAccountRole
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleRequest'
+      responses:
+        '201':
+          description: Role assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountRole'
+        '409':
+          description: Role cardinality violation
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fd-accounts/{accountId}/transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions for an account
+      description: >
+        Read side of the shared FD_TRANSACTIONS writer used internally by
+        Actions 5, 9, 11, 12, 14, 15. Exposed as a read endpoint so a caller
+        can retrieve statement/ledger history for one account.
+      operationId: listFdTransactions
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - name: txnType
+          in: query
+          schema:
+            type: string
+            enum: [DEPOSIT, WITHDRAWAL, INTEREST, MATURITY_PAYOUT, TDS]
+        - name: fromDate
+          in: query
+          schema: { type: string, format: date }
+        - name: toDate
+          in: query
+          schema: { type: string, format: date }
+        - name: page
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Paged transaction list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items: { $ref: '#/components/schemas/FdTransaction' }
+                  totalElements: { type: integer }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fd-accounts/{accountId}/interest-calculations:
+    post:
+      tags: [Interest]
+      summary: Calculate interest — preview only (Action 10)
+      description: >
+        Pure computation, no persistence. Uses the account's snapshotted
+        terms (rate, interestType, compoundingFrequency, currency +
+        decimals) plus a caller-supplied period. Lets a customer or teller
+        preview accrual for a hypothetical period without waiting for the
+        nightly batch. Day-count convention defaults to ACT/365 pending
+        Group 2 confirmation.
+      operationId: calculateInterestPreview
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periodStart, periodEnd]
+              properties:
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+      responses:
+        '200':
+          description: Computed interest for the requested period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  principal: { type: number, format: double }
+                  rate: { type: number, format: double }
+                  periodStart: { type: string, format: date }
+                  periodEnd: { type: string, format: date }
+                  dayCountConvention: { type: string, example: "ACT/365" }
+                  interestAmount: { type: number, format: double }
+                  currencyCode: { type: string, example: "INR" }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fd-accounts/{accountId}/withdraw:
+    post:
+      tags: [Accounts]
+      summary: Validate and process early withdrawal (Action 12)
+      description: >
+        Distinct from the generic transaction endpoint because it carries
+        withdrawal-specific validation (elapsed tenure, penalty rule) and
+        writes two linked rows (WITHDRAWAL + penalty-adjusted INTEREST) plus
+        an account status update, atomically. NOTE — open item: G2's
+        PRODUCT_FEE_MATRIX models flat/percent fees; standard FD penalties
+        are usually a rate haircut. This endpoint's penalty calculation is
+        unresolved pending clarification from Group 2 (see justification doc).
+      operationId: processEarlyWithdrawal
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: number, format: double }
+                remarks: { type: string }
+      responses:
+        '200':
+          description: Withdrawal processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FdAccount'
+        '409':
+          description: Account not in a withdrawable state (e.g. already closed)
+        '501':
+          description: Penalty model not yet finalized (see open item)
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fd-accounts/{accountId}/renew:
+    post:
+      tags: [Maturity]
+      summary: Process maturity — renew (Action 15)
+      description: >
+        Customer-initiated, manual. Opens a new linked FD_ACCOUNTS row (new
+        account number) referencing this account via FDA_RENEWED_FROM_ID,
+        and closes this account as MATURED_RENEWED. Must be called before the
+        maturity batch job (Action 14) processes this account, or the batch
+        will instead close it as a straight payout.
+      operationId: renewFdAccount
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tenureMonths:
+                  type: integer
+                  description: Optional override; defaults to original tenure
+      responses:
+        '201':
+          description: New account created, old account closed as MATURED_RENEWED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FdAccount'
+        '409':
+          description: Account not yet matured, or already closed
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fd-accounts/{accountId}/receipt:
+    get:
+      tags: [Receipts]
+      summary: Issue term deposit receipt (Action 16)
+      description: >
+        Generates the receipt document on demand; not persisted. Issuance
+        itself is logged as an FDNT_EVENT_TYP='FDR_ISSUED' row in
+        FD_NOTIFICATION_LOG for audit purposes.
+      operationId: getFdReceipt
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - name: format
+          in: query
+          schema: { type: string, enum: [pdf, json], default: pdf }
+      responses:
+        '200':
+          description: Receipt document
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /reports/fd-accounts:
+    get:
+      tags: [Reports]
+      summary: Generate account/portfolio reports (Action 18)
+      description: >
+        Stateless — report-service reads fd_db directly. Uses snapshotted
+        display fields (FDA_CUST_NAME_SNAP, FDA_PRD_NAME_SNAP) to avoid
+        cross-module joins. OPEN ITEM — by-user reports take a userId, but
+        no FD table stores USR_ID (only CUST_ID). Per the recommended fix,
+        this endpoint expects the gateway to resolve USR_ID -> CUST_ID from
+        the JWT and pass custId; it does not accept a raw userId param.
+      operationId: getFdAccountReport
+      parameters:
+        - name: fromDate
+          in: query
+          schema: { type: string, format: date }
+        - name: toDate
+          in: query
+          schema: { type: string, format: date }
+        - name: custId
+          in: query
+          schema: { type: string }
+          description: Resolved server-side from JWT by the gateway, not client-supplied
+        - name: reportType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [PORTFOLIO_SUMMARY, TDS_COMPLIANCE, MATURITY_SCHEDULE]
+      responses:
+        '200':
+          description: Report data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reportType: { type: string }
+                  generatedAt: { type: string, format: date-time }
+                  rows:
+                    type: array
+                    items: { type: object }
+
+  /batch-jobs/{jobName}/runs:
+    post:
+      tags: [Batch]
+      summary: Trigger a batch job run (Action 17) — admin/ops only
+      description: >
+        Manual trigger for the accrual or maturity batch job, for ops use
+        outside the scheduled run (e.g. re-run after a failure). Application
+        still multithreads internally; FD_BATCH_RUN_LOG records one summary
+        row per run (not per partition/thread). Idempotency is enforced via
+        FDA_LAST_ACCRUAL_DT, so a duplicate trigger for an already-processed
+        business date is a no-op, not an error.
+      operationId: triggerBatchRun
+      parameters:
+        - name: jobName
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ACCRUAL, MATURITY]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessDate]
+              properties:
+                businessDate: { type: string, format: date }
+      responses:
+        '202':
+          description: Batch run accepted/queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchRun'
+        '403':
+          description: Caller lacks ops/admin role
+
+    get:
+      tags: [Batch]
+      summary: List recent batch job runs
+      operationId: listBatchRuns
+      parameters:
+        - name: jobName
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ACCRUAL, MATURITY]
+        - name: businessDate
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Batch run history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BatchRun' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Issued by Login & Auth module (AUTH_USERS). Carries role/identity
+        claims only — FD module resolves USR_ID -> CUST_ID via the gateway,
+        never joins to AUTH_USERS directly (separate database).
+
+  parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: FDA_ID
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+
+    CreateFdAccountRequest:
+      type: object
+      required: [custId, productCode, principal, tenureMonths]
+      properties:
+        custId: { type: string }
+        productCode: { type: string }
+        principal: { type: number, format: double }
+        tenureMonths: { type: integer }
+        rateId:
+          type: string
+          description: Logical FK to PRODUCT_RATE_MATRIX row (rate traceability)
+        categoryCd:
+          type: string
+          description: >
+            Customer category code. NOTE — open item: no confirmed
+            customer->category mapping exists yet from the Customer module;
+            requests may 422 until resolved.
+        currencyCode: { type: string, example: "INR" }
+        payoutFreq:
+          type: string
+          description: Kept distinct from compounding frequency
+        compoundingFreq: { type: string }
+        maturityInstruction:
+          type: string
+          enum: [PAYOUT, RENEW]
+        initialRoles:
+          type: array
+          items: { $ref: '#/components/schemas/AssignRoleRequest' }
+          description: At least one role (typically OWNER) required at creation
+
+    AssignRoleRequest:
+      type: object
+      required: [custId, roleType]
+      properties:
+        custId: { type: string }
+        roleType:
+          type: string
+          enum: [OWNER, JOINT_HOLDER, NOMINEE, GUARANTOR, GUARDIAN, BENEFICIARY]
+        isPrimary: { type: boolean }
+
+    AccountRole:
+      allOf:
+        - $ref: '#/components/schemas/AssignRoleRequest'
+        - type: object
+          properties:
+            fdrlId: { type: string }
+            fdaId: { type: string }
+            efctvDt: { type: string, format: date }
+
+    FdAccountSummary:
+      type: object
+      properties:
+        fdaId: { type: string }
+        acctNum: { type: string }
+        status: { type: string }
+        principalBal: { type: number, format: double }
+        matDt: { type: string, format: date }
+        productCode: { type: string }
+        custNameSnap: { type: string }
+
+    FdAccount:
+      type: object
+      properties:
+        fdaId: { type: string }
+        acctNum: { type: string }
+        custId: { type: string }
+        productCode: { type: string }
+        rateId: { type: string }
+        categoryCd: { type: string }
+        currencyCode: { type: string }
+        principalAmt: { type: number, format: double }
+        principalBal: { type: number, format: double }
+        accruedIntAmt: { type: number, format: double }
+        intRt: { type: number, format: double }
+        compoundFreq: { type: string }
+        payoutFreq: { type: string }
+        dayCountConv: { type: string }
+        tenureMonths: { type: integer }
+        openDt: { type: string, format: date }
+        valueDt: { type: string, format: date }
+        matDt: { type: string, format: date }
+        matAmt: { type: number, format: double }
+        matInstruction: { type: string }
+        status:
+          type: string
+          enum: [ACTIVE, MATURED_CLOSED, MATURED_RENEWED, CLOSED]
+        renewedFromId: { type: string, nullable: true }
+        custNameSnap: { type: string }
+        prdNameSnap: { type: string }
+
+    FdTransaction:
+      type: object
+      properties:
+        fdtId: { type: integer, format: int64 }
+        fdaId: { type: string }
+        txnGrpId: { type: string }
+        txnType:
+          type: string
+          enum: [DEPOSIT, WITHDRAWAL, INTEREST, MATURITY_PAYOUT, TDS]
+        drCr: { type: string, enum: [D, C] }
+        amt: { type: number, format: double }
+        balBefore: { type: number, format: double }
+        balAfter: { type: number, format: double }
+        ccyCd: { type: string }
+        txnDt: { type: string, format: date }
+        valueDt: { type: string, format: date }
+        txnTs: { type: string, format: date-time }
+        tdsRt: { type: number, format: double, nullable: true }
+        remarks: { type: string }
+
+    Receipt:
+      type: object
+      properties:
+        fdaId: { type: string }
+        acctNum: { type: string }
+        custNameSnap: { type: string }
+        principalAmt: { type: number, format: double }
+        intRt: { type: number, format: double }
+        openDt: { type: string, format: date }
+        matDt: { type: string, format: date }
+        matAmt: { type: number, format: double }
+        issuedTs: { type: string, format: date-time }
+
+    BatchRun:
+      type: object
+      properties:
+        fdjbId: { type: integer, format: int64 }
+        jobName: { type: string, enum: [ACCRUAL, MATURITY] }
+        businessDt: { type: string, format: date }
+        status: { type: string, enum: [RUNNING, SUCCESS, FAILED, PARTIAL] }
+        readCnt: { type: integer }
+        writeCnt: { type: integer }
+        skipCnt: { type: integer }
+        startTs: { type: string, format: date-time }
+        endTs: { type: string, format: date-time }
+        errorMsg: { type: string, nullable: true }
