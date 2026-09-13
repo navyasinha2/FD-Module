@@ -59,6 +59,7 @@ function validate(formValues, roles) {
 
   if (!formValues.custId) errors.push('Customer ID is required.');
   if (!formValues.productCode) errors.push('Product Code is required.');
+  if (!formValues.rateId) errors.push('Rate ID is required.');
 
   const principal = Number(formValues.principal);
   if (!formValues.principal || Number.isNaN(principal) || principal <= 0) {
@@ -118,6 +119,7 @@ function buildPayload(formValues, roles) {
     productCode: formValues.productCode,
     principal: Number(formValues.principal),
     tenureMonths: Number(formValues.tenureMonths),
+    rateId: formValues.rateId,
     initialRoles: roles.map((role) => ({
       custId: role.custId,
       roleType: role.roleType,
@@ -125,9 +127,9 @@ function buildPayload(formValues, roles) {
     })),
   };
 
-  if (formValues.rateId) payload.rateId = formValues.rateId;
   if (formValues.categoryCd) payload.categoryCd = formValues.categoryCd;
   if (formValues.currencyCode) payload.currencyCode = formValues.currencyCode.toUpperCase();
+  if (formValues.interestType) payload.interestType = formValues.interestType;
   if (formValues.compoundingFreq) payload.compoundingFreq = formValues.compoundingFreq;
   if (formValues.payoutFreq) payload.payoutFreq = formValues.payoutFreq;
   if (formValues.maturityInstruction) payload.maturityInstruction = formValues.maturityInstruction;

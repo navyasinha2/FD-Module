@@ -1,5 +1,9 @@
 HELP.md
 target/
+# Local machine credentials (Spring Boot loads ./config/application.properties).
+# Anchored with a leading slash so it only matches backend/fdservice/config, not the
+# com.banklab.fdservice.config Java package.
+/config/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

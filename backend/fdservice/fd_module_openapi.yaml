@@ -60,7 +60,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/FdAccount'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Validation error, or INVALID_PRINCIPAL — principal has more decimal
+            places than the currency (or DECIMAL(18,2)) allows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404':
           description: Product, rate, or customer-category mapping not found
         '409':
@@ -183,7 +188,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [DEPOSIT, WITHDRAWAL, INTEREST, MATURITY_PAYOUT, TDS]
+            enum: [DEPOSIT, WITHDRAWAL, INTEREST, PENALTY, MATURITY_PAYOUT, TDS]
         - name: fromDate
           in: query
           schema: { type: string, format: date }
@@ -220,8 +225,9 @@ paths:
         terms (rate, interestType, compoundingFrequency, currency +
         decimals) plus a caller-supplied period. Lets a customer or teller
         preview accrual for a hypothetical period without waiting for the
-        nightly batch. Day-count convention defaults to ACT/365 pending
-        Group 2 confirmation.
+        nightly batch. Uses the account's snapshotted day-count convention —
+        ACT/ACT (leap-year days / 366) for new accounts, pending Group 2
+        confirmation. The start date counts, the end date doesn't.
       operationId: calculateInterestPreview
       parameters:
         - $ref: '#/components/parameters/AccountId'
@@ -237,7 +243,10 @@ paths:
                 periodEnd: { type: string, format: date }
       responses:
         '200':
-          description: Computed interest for the requested period
+          description: >
+            Computed interest for the requested period. ACT/365 on each
+            compounding sub-period (boundaries = periodStart + k × frequency months),
+            capitalized at currency decimals — the same arithmetic as the batch.
           content:
             application/json:
               schema:
@@ -247,11 +256,21 @@ paths:
                   rate: { type: number, format: double }
                   periodStart: { type: string, format: date }
                   periodEnd: { type: string, format: date }
-                  dayCountConvention: { type: string, example: "ACT/365" }
+                  dayCountConvention: { type: string, example: "ACT/ACT" }
                   interestAmount: { type: number, format: double }
                   currencyCode: { type: string, example: "INR" }
+                  interestType: { type: string, enum: [SIMPLE, COMPOUND] }
+                  compoundingFrequency: { type: string }
+                  payoutFrequency: { type: string }
+                  days: { type: integer }
+                  interestPaidOut: { type: number, format: double }
+                  maturityValue: { type: number, format: double }
+        '400':
+          description: periodEnd before periodStart (INVALID_PERIOD)
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Account's snapshotted terms can't be calculated (INVALID_INTEREST_TERMS)
 
   /fd-accounts/{accountId}/withdraw:
     post:
@@ -265,18 +284,25 @@ paths:
         PRODUCT_FEE_MATRIX models flat/percent fees; standard FD penalties
         are usually a rate haircut. This endpoint's penalty calculation is
         unresolved pending clarification from Group 2 (see justification doc).
+        IMPLEMENTED AS — full closure only, on the current business date:
+        interest accrued since the last boundary is credited, a penalty of
+        fd.premature-withdrawal.penalty-pct % of all interest earned (+ optional
+        flat fee) is debited, the remainder is paid out, and the account becomes
+        CLOSED. INTEREST, PENALTY and WITHDRAWAL rows share one FDT_TXN_GRP_ID.
       operationId: processEarlyWithdrawal
       parameters:
         - $ref: '#/components/parameters/AccountId'
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [amount]
               properties:
-                amount: { type: number, format: double }
+                amount:
+                  type: number
+                  format: double
+                  description: Optional; if given it must equal the full balance
                 remarks: { type: string }
       responses:
         '200':
@@ -284,11 +310,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FdAccount'
+                $ref: '#/components/schemas/PrematureWithdrawalResult'
         '409':
-          description: Account not in a withdrawable state (e.g. already closed)
-        '501':
-          description: Penalty model not yet finalized (see open item)
+          description: >
+            ACCOUNT_NOT_ACTIVE, WITHDRAWAL_BEFORE_VALUE_DATE, ACCOUNT_MATURED
+            (on/after maturity it's maturity processing),
+            ACCRUAL_AHEAD_OF_BUSINESS_DATE (interest already accrued past the
+            business date), or PARTIAL_WITHDRAWAL_NOT_SUPPORTED
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -404,7 +432,11 @@ paths:
         still multithreads internally; FD_BATCH_RUN_LOG records one summary
         row per run (not per partition/thread). Idempotency is enforced via
         FDA_LAST_ACCRUAL_DT, so a duplicate trigger for an already-processed
-        business date is a no-op, not an error.
+        business date is a no-op, not an error. ACCRUAL for business date D
+        accrues interest for every day up to and including D (daily GL entries
+        Dr FD_INT_EXP / Cr FD_INT_PAYABLE); MATURITY for D closes accounts whose
+        maturity date is on or before D. businessDate may not be after
+        FD_BUSINESS_CLOCK (409 BUSINESS_DATE_AFTER_CLOCK).
       operationId: triggerBatchRun
       parameters:
         - name: jobName
@@ -431,10 +463,14 @@ paths:
                 $ref: '#/components/schemas/BatchRun'
         '403':
           description: Caller lacks ops/admin role
+        '409':
+          description: >
+            BUSINESS_DATE_AFTER_CLOCK (businessDate is later than FD_BUSINESS_CLOCK —
+            advance the clock first) or BATCH_ALREADY_RUNNING
 
     get:
       tags: [Batch]
-      summary: List recent batch job runs
+      summary: List recent batch job runs (latest 50, or all runs for businessDate)
       operationId: listBatchRuns
       parameters:
         - name: jobName
@@ -454,6 +490,104 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/BatchRun' }
+
+  /business-clock:
+    get:
+      tags: [Batch]
+      summary: Current business date (FD_BUSINESS_CLOCK)
+      operationId: getBusinessClock
+      responses:
+        '200':
+          description: Business clock
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessClock' }
+    put:
+      tags: [Batch]
+      summary: Set the business date ("time travel", testing/demo)
+      operationId: setBusinessDate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessDate]
+              properties:
+                businessDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Updated clock
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessClock' }
+
+  /business-clock/advance:
+    post:
+      tags: [Batch]
+      summary: Move the business date forward by N days
+      operationId: advanceBusinessDate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Updated clock
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessClock' }
+
+  /business-clock/eod:
+    post:
+      tags: [Batch]
+      summary: Run end of day now — ACCRUAL then MATURITY for the business date, then advance one day
+      description: >
+        Same cycle the scheduler runs automatically at 12:00 am Asia/Kolkata
+        (fd.batch.eod-cron / fd.batch.eod-zone), which also replays any missed
+        business dates. The date is not advanced if either job FAILED.
+      operationId: runEndOfDay
+      responses:
+        '200':
+          description: EOD result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  businessDate: { type: string, format: date }
+                  accrual: { $ref: '#/components/schemas/BatchRun' }
+                  maturity: { $ref: '#/components/schemas/BatchRun' }
+                  clock: { $ref: '#/components/schemas/BusinessClock' }
+        '409':
+          description: Another batch run is in progress (BATCH_ALREADY_RUNNING)
+
+  /gl-accounts:
+    get:
+      tags: [Batch]
+      summary: FD_GL_ACCOUNTS with running balances
+      operationId: listGlAccounts
+      responses:
+        '200':
+          description: GL accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    glCd: { type: string }
+                    name: { type: string }
+                    type: { type: string, enum: [ASSET, LIABILITY, INCOME, EXPENSE] }
+                    currencyCode: { type: string }
+                    currentBalance: { type: number, format: double }
+                    active: { type: boolean }
 
 components:
   securitySchemes:
@@ -495,7 +629,7 @@ components:
 
     CreateFdAccountRequest:
       type: object
-      required: [custId, productCode, principal, tenureMonths]
+      required: [custId, productCode, principal, tenureMonths, rateId]
       properties:
         custId: { type: string }
         productCode: { type: string }
@@ -503,7 +637,11 @@ components:
         tenureMonths: { type: integer }
         rateId:
           type: string
-          description: Logical FK to PRODUCT_RATE_MATRIX row (rate traceability)
+          maxLength: 20
+          description: >
+            Logical FK to PRODUCT_RATE_MATRIX row — required, the contracted rate is
+            snapshotted from it (404 if unknown, 422 if it carries no rate). Planned:
+            resolved from productCode by Group 2 once their service provides it.
         categoryCd:
           type: string
           description: >
@@ -514,7 +652,18 @@ components:
         payoutFreq:
           type: string
           description: Kept distinct from compounding frequency
-        compoundingFreq: { type: string }
+          enum: [MONTHLY, QUARTERLY, HALF_YEARLY, ANNUALLY, ON_MATURITY]
+        compoundingFreq:
+          type: string
+          enum: [MONTHLY, QUARTERLY, HALF_YEARLY, ANNUALLY]
+        interestType:
+          type: string
+          enum: [SIMPLE, COMPOUND]
+          description: >
+            Snapshotted to FDA_INT_TYP. Optional — omitted means the product's
+            defaultInterestType from Group 2, else fd.interest.default-interest-type
+            (COMPOUND). COMPOUND capitalizes at compoundingFreq boundaries; SIMPLE pays
+            interest out at payoutFreq boundaries (or at maturity for ON_MATURITY).
         maturityInstruction:
           type: string
           enum: [PAYOUT, RENEW]
@@ -567,6 +716,7 @@ components:
         principalBal: { type: number, format: double }
         accruedIntAmt: { type: number, format: double }
         intRt: { type: number, format: double }
+        interestType: { type: string, enum: [SIMPLE, COMPOUND] }
         compoundFreq: { type: string }
         payoutFreq: { type: string }
         dayCountConv: { type: string }
@@ -579,9 +729,13 @@ components:
         status:
           type: string
           enum: [ACTIVE, MATURED_CLOSED, MATURED_RENEWED, CLOSED]
+        lastAccrualDt: { type: string, format: date, nullable: true }
+        lastCaptlzDt: { type: string, format: date, nullable: true }
+        closureDt: { type: string, format: date, nullable: true }
         renewedFromId: { type: string, nullable: true }
         custNameSnap: { type: string }
         prdNameSnap: { type: string }
+        ccyDecimals: { type: integer }
 
     FdTransaction:
       type: object
@@ -591,7 +745,7 @@ components:
         txnGrpId: { type: string }
         txnType:
           type: string
-          enum: [DEPOSIT, WITHDRAWAL, INTEREST, MATURITY_PAYOUT, TDS]
+          enum: [DEPOSIT, WITHDRAWAL, INTEREST, PENALTY, MATURITY_PAYOUT, TDS]
         drCr: { type: string, enum: [D, C] }
         amt: { type: number, format: double }
         balBefore: { type: number, format: double }
@@ -616,13 +770,39 @@ components:
         matAmt: { type: number, format: double }
         issuedTs: { type: string, format: date-time }
 
+    PrematureWithdrawalResult:
+      type: object
+      properties:
+        status: { type: string, example: success }
+        message: { type: string }
+        withdrawalDate: { type: string, format: date }
+        interestEarned: { type: number, format: double, description: All INTEREST posted over the account's life (penalty base) }
+        finalInterest: { type: number, format: double, description: Interest since the last boundary, credited at closure }
+        penaltyApplied: { type: number, format: double }
+        withdrawalAmount: { type: number, format: double }
+        account: { $ref: '#/components/schemas/FdAccount' }
+
+    BusinessClock:
+      type: object
+      properties:
+        entityCd: { type: string }
+        businessDate: { type: string, format: date }
+        previousBusinessDate: { type: string, format: date, nullable: true }
+        eodStatus: { type: string, enum: [OPEN, RUNNING, COMPLETED, FAILED] }
+        lastEodTs: { type: string, format: date-time, nullable: true }
+
     BatchRun:
       type: object
       properties:
         fdjbId: { type: integer, format: int64 }
         jobName: { type: string, enum: [ACCRUAL, MATURITY] }
         businessDt: { type: string, format: date }
-        status: { type: string, enum: [RUNNING, SUCCESS, FAILED, PARTIAL] }
+        status:
+          type: string
+          enum: [RUNNING, SUCCESS, FAILED, PARTIAL]
+          description: >
+            FDJB_STS uses this enum (resolves the ERD doc's RUNNING/COMPLETED/FAILED).
+            PARTIAL = completed with skipped accounts (skipCnt > 0).
         readCnt: { type: integer }
         writeCnt: { type: integer }
         skipCnt: { type: integer }

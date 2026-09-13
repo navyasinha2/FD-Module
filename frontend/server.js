@@ -18,12 +18,21 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-  const requestedPath = decodeURIComponent(req.url.split('?')[0]);
+  let requestedPath;
+  try {
+    requestedPath = decodeURIComponent(req.url.split('?')[0]);
+  } catch {
+    // Malformed percent-encoding (e.g. /%E0) would otherwise throw and kill the server.
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Bad request');
+    return;
+  }
   const relativePath = requestedPath === '/' ? '/index.html' : requestedPath;
   const filePath = path.normalize(path.join(ROOT, relativePath));
 
-  // Guard against path traversal outside the frontend root.
-  if (!filePath.startsWith(ROOT)) {
+  // Guard against path traversal outside the frontend root (including sibling
+  // folders whose names merely start with the root's name, e.g. ../frontend2).
+  if (!filePath.startsWith(ROOT + path.sep)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('Forbidden');
     return;

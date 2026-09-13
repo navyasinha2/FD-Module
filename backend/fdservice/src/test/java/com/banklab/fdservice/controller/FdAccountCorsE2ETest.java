@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -18,16 +20,19 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.banklab.fdservice.client.ProductDetails;
 import com.banklab.fdservice.client.ProductPricingClient;
+import com.banklab.fdservice.client.RateDetails;
 import com.banklab.fdservice.entity.FdAccount;
 import com.banklab.fdservice.entity.FdAccountSequence;
 import com.banklab.fdservice.repository.FdAccountRepository;
 import com.banklab.fdservice.repository.FdAccountRoleRepository;
 import com.banklab.fdservice.repository.FdAccountSequenceRepository;
+import com.banklab.fdservice.support.FdTestDatabase;
 
 /**
  * End-to-end proof of the full frontend -> backend -> DB path added while G1 is
@@ -63,8 +68,13 @@ class FdAccountCorsE2ETest {
     @MockitoBean
     private ProductPricingClient productPricingClient;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void setUp() {
+        // Ledger rows (FK → FD_ACCOUNTS) must be cleared before accounts; see FdTestDatabase.
+        new FdTestDatabase(jdbcTemplate).clearFdData();
         roleRepository.deleteAll();
         accountRepository.deleteAll();
 
@@ -77,7 +87,10 @@ class FdAccountCorsE2ETest {
                 .build());
 
         when(productPricingClient.getProduct("FD-REG")).thenReturn(new ProductDetails(
-                "FD-REG", "Regular Fixed Deposit", "USD", "QUARTERLY", "QUARTERLY", "PAYOUT"));
+                "FD-REG", "Regular Fixed Deposit", "USD", "QUARTERLY", "QUARTERLY", "PAYOUT", "COMPOUND"));
+        when(productPricingClient.getRate("RATE-12M")).thenReturn(Optional.of(new RateDetails(
+                "RATE-12M", "FD-REG", 12, new BigDecimal("6.50"), LocalDate.parse("2025-01-01"),
+                LocalDate.parse("2027-12-31"))));
     }
 
     @Test
@@ -100,6 +113,7 @@ class FdAccountCorsE2ETest {
                   "productCode": "FD-REG",
                   "principal": 75000.00,
                   "tenureMonths": 24,
+                  "rateId": "RATE-12M",
                   "currencyCode": "USD",
                   "maturityInstruction": "PAYOUT",
                   "initialRoles": [

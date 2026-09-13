@@ -27,9 +27,9 @@ public class ProductPricingClientStub implements ProductPricingClient {
 
     private static final Map<String, ProductDetails> KNOWN_PRODUCTS = Map.of(
             "FD-REG", new ProductDetails(
-                    "FD-REG", "Regular Fixed Deposit", "USD", "QUARTERLY", "QUARTERLY", "PAYOUT"),
+                    "FD-REG", "Regular Fixed Deposit", "USD", "QUARTERLY", "QUARTERLY", "PAYOUT", "COMPOUND"),
             "FD-SR", new ProductDetails(
-                    "FD-SR", "Senior Citizen Fixed Deposit", "USD", "QUARTERLY", "MONTHLY", "PAYOUT"));
+                    "FD-SR", "Senior Citizen Fixed Deposit", "USD", "QUARTERLY", "MONTHLY", "PAYOUT", "SIMPLE"));
 
     @Override
     public ProductDetails getProduct(String productCode) {
@@ -41,7 +41,8 @@ public class ProductPricingClientStub implements ProductPricingClient {
         if (known != null) {
             return known;
         }
-        return new ProductDetails(productCode, "Product " + productCode, "USD", "QUARTERLY", "QUARTERLY", "PAYOUT");
+        return new ProductDetails(productCode, "Product " + productCode, "USD", "QUARTERLY", "QUARTERLY", "PAYOUT",
+                "COMPOUND");
     }
 
     @Override

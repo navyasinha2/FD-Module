@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,17 +17,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.banklab.fdservice.client.ProductDetails;
 import com.banklab.fdservice.client.ProductPricingClient;
+import com.banklab.fdservice.client.RateDetails;
 import com.banklab.fdservice.entity.FdAccount;
 import com.banklab.fdservice.entity.FdAccountRole;
 import com.banklab.fdservice.entity.FdAccountSequence;
 import com.banklab.fdservice.repository.FdAccountRepository;
 import com.banklab.fdservice.repository.FdAccountRoleRepository;
 import com.banklab.fdservice.repository.FdAccountSequenceRepository;
+import com.banklab.fdservice.support.FdTestDatabase;
 
 /**
  * End-to-end proof that POST /fd-accounts actually commits data: drives the real
@@ -57,8 +62,14 @@ class FdAccountCreationIntegrationTest {
     @MockitoBean
     private ProductPricingClient productPricingClient;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void setUp() {
+        // Account creation now also posts a DEPOSIT (FD_TRANSACTIONS + FD_GL_ENTRIES), and
+        // FD_TRANSACTIONS.FDA_ID is an enforced FK — ledger rows go before accounts.
+        new FdTestDatabase(jdbcTemplate).clearFdData();
         roleRepository.deleteAll();
         accountRepository.deleteAll();
 
@@ -71,7 +82,10 @@ class FdAccountCreationIntegrationTest {
                 .build());
 
         when(productPricingClient.getProduct("FD-REG")).thenReturn(new ProductDetails(
-                "FD-REG", "Regular Fixed Deposit", "USD", "QUARTERLY", "QUARTERLY", "PAYOUT"));
+                "FD-REG", "Regular Fixed Deposit", "USD", "QUARTERLY", "QUARTERLY", "PAYOUT", "COMPOUND"));
+        when(productPricingClient.getRate("RATE-12M")).thenReturn(Optional.of(new RateDetails(
+                "RATE-12M", "FD-REG", 12, new BigDecimal("6.50"), LocalDate.parse("2025-01-01"),
+                LocalDate.parse("2027-12-31"))));
     }
 
     @Test
@@ -82,6 +96,7 @@ class FdAccountCreationIntegrationTest {
                   "productCode": "FD-REG",
                   "principal": 50000.00,
                   "tenureMonths": 12,
+                  "rateId": "RATE-12M",
                   "currencyCode": "USD",
                   "maturityInstruction": "PAYOUT",
                   "initialRoles": [

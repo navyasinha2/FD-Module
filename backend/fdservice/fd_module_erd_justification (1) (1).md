@@ -220,6 +220,12 @@ credits per event, `FDGE_DR_CR`, `FDGE_AMT`, `FDGE_POST_DT`, `FDGE_NARRATIVE`).
 bookkeeping for the same events — a deposit is a liability, interest paid is an expense,
 neither visible from the customer ledger alone.
 
+Interest follows accrual accounting: each end-of-day run recognises the day's interest in
+the GL (Dr `FD_INT_EXP` / Cr `FD_INT_PAYABLE`, `FDGE_FDT_ID` null — there is no customer
+transaction yet), and when interest is capitalized or paid out it moves out of
+`FD_INT_PAYABLE` into the deposit or settlement. `FD_INT_PAYABLE` therefore always equals the
+rounded `FDA_ACCRUED_INT_AMT` of the active accounts.
+
 ---
 
 ## 11. `FD_NOTIFICATION_LOG` (FDNT) — customer communication
@@ -251,7 +257,7 @@ per thread/partition).
 |---|---|
 | `FDJB_JOB_NAME` | ACCRUAL or MATURITY |
 | `FDJB_BUSINESS_DT` | Business date processed |
-| `FDJB_STS` | RUNNING / COMPLETED / FAILED |
+| `FDJB_STS` | RUNNING / SUCCESS / FAILED / PARTIAL — aligned with the OpenAPI `BatchRun.status` enum; PARTIAL = the run completed but skipped some accounts |
 | `FDJB_READ_CNT` / `WRITE_CNT` / `SKIP_CNT` | Standard batch chunk metrics |
 | `FDJB_START_TS` / `FDJB_END_TS` / `FDJB_ERROR_MSG` | |
 | `FDJB_EFCTV_DT` + audit set | |
@@ -278,8 +284,18 @@ batch processing and account "time travel" don't depend on the system clock.
 fee or percent-of-principal; standard FD penalties are usually a rate haircut instead.
 Needs clarification before Action 12 can be implemented precisely.
 
-**Day-count convention not published by G2.** `FDA_DAY_COUNT_CONV` currently defaults to
-`ACT/365` until G2 confirms a product-level field for this.
+**Day-count convention not published by G2.** `FDA_DAY_COUNT_CONV` defaults to `ACT/ACT`
+for new accounts (days falling in a leap year earn 1/366 of the annual rate, other days
+1/365) until G2 confirms a product-level field. Accounts booked earlier keep the `ACT/365`
+they were snapshotted with (P1).
+
+**Interest type not published by G2.** `FDA_INT_TYP` (SIMPLE / COMPOUND) is resolved at
+booking from the create request's `interestType`, then the product's `defaultInterestType`
+(a field fd-service's `ProductDetails` projection now expects but G2 has not confirmed),
+then the `fd.interest.default-interest-type` setting (COMPOUND). Rows booked before this
+was wired hold `NULL` and are read with the same configured default. It matters beyond
+display: COMPOUND capitalizes at `FDA_COMPOUND_FREQ` boundaries, SIMPLE pays out at
+`FDA_PAYOUT_FREQ` boundaries.
 
 **By-user report can't resolve `USR_ID → CUST_ID` in a stateless `report-service`.**
 Recommend the API gateway resolve this from the JWT and pass `CUST_ID` down, rather than

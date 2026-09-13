@@ -8,6 +8,10 @@
 </head>
 <body>
   <main class="page">
+    <nav class="topnav">
+      <a href="index.html" aria-current="page">Open account</a>
+      <a href="operations.html">Operations</a>
+    </nav>
     <h1>Open Fixed Deposit Account</h1>
     <p class="subtitle">fd-service · POST /fd-accounts</p>
 
@@ -30,11 +34,19 @@
         <label for="currencyCode">Currency Code</label>
         <input type="text" id="currencyCode" name="currencyCode" placeholder="USD" maxlength="3" />
 
-        <label for="rateId">Rate ID</label>
-        <input type="text" id="rateId" name="rateId" placeholder="(optional)" />
+        <label for="rateId">Rate ID *</label>
+        <input type="text" id="rateId" name="rateId" placeholder="RATE-12M" maxlength="20" required />
+        <p class="hint">Contracted rate from Product &amp; Pricing. It will fill in from the product code once Group 2's service is live.</p>
 
         <label for="categoryCd">Category Code</label>
         <input type="text" id="categoryCd" name="categoryCd" placeholder="(optional)" />
+
+        <label for="interestType">Interest Type</label>
+        <select id="interestType" name="interestType">
+          <option value="">Use default (Compound)</option>
+          <option value="COMPOUND">Compound — interest added to principal</option>
+          <option value="SIMPLE">Simple — interest paid out</option>
+        </select>
 
         <label for="compoundingFreq">Compounding Frequency</label>
         <select id="compoundingFreq" name="compoundingFreq">
@@ -48,6 +60,7 @@
         <label for="payoutFreq">Payout Frequency</label>
         <select id="payoutFreq" name="payoutFreq">
           <option value="">Use product default</option>
+          <option value="ON_MATURITY">On maturity</option>
           <option value="MONTHLY">Monthly</option>
           <option value="QUARTERLY">Quarterly</option>
           <option value="HALF_YEARLY">Half-yearly</option>

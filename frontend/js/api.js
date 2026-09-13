@@ -3,19 +3,21 @@
 const API_BASE_URL = 'http://localhost:8080';
 
 /**
- * POSTs a CreateFdAccountRequest-shaped payload to the backend.
- * Resolves with the parsed FdAccount response on 2xx.
+ * Calls the backend and resolves with the parsed JSON body on 2xx.
  * Rejects with an Error whose `.body` is the parsed ErrorResponse ({code, message})
- * when the backend responds with a non-2xx status, or a plain Error on network failure.
+ * and `.status` the HTTP status when the backend responds non-2xx, or a plain Error
+ * on network failure.
  */
-async function createFdAccount(payload) {
+async function apiRequest(method, path, payload) {
+  const options = { method, headers: {} };
+  if (payload !== undefined) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(payload);
+  }
+
   let response;
   try {
-    response = await fetch(`${API_BASE_URL}/fd-accounts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    response = await fetch(`${API_BASE_URL}${path}`, options);
   } catch (networkError) {
     throw new Error(
       `Could not reach the backend at ${API_BASE_URL}. Is fd-service running? (${networkError.message})`
@@ -26,7 +28,9 @@ async function createFdAccount(payload) {
 
   if (!response.ok) {
     const error = new Error(
-      responseBody ? `${responseBody.code}: ${responseBody.message}` : `Request failed with status ${response.status}`
+      responseBody && responseBody.code
+        ? `${responseBody.code}: ${responseBody.message}`
+        : `Request failed with status ${response.status}`
     );
     error.body = responseBody;
     error.status = response.status;
@@ -34,4 +38,12 @@ async function createFdAccount(payload) {
   }
 
   return responseBody;
+}
+
+/**
+ * POSTs a CreateFdAccountRequest-shaped payload to the backend.
+ * Resolves with the parsed FdAccount response.
+ */
+async function createFdAccount(payload) {
+  return apiRequest('POST', '/fd-accounts', payload);
 }
