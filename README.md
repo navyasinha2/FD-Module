@@ -39,6 +39,8 @@ Stop/start preserves the database volume. After changing Java source, restart th
 
 ## Reports
 
+The frontend uses a NeuroBank-inspired dashboard with a shared sidebar, responsive mobile navigation, and dark/light themes saved across pages. The reports overview reads the existing portfolio, liability, and monthly growth APIs to show actual balances and account statuses. Currency totals remain separate, and the original report filters, downloads, account forms, and operations remain available.
+
 `GET /fd/v1/reports/fd-accounts?reportType=...` accepts optional `custId`, `accountId`, `fromDate`, `toDate`, and `format=json|csv|pdf`. `ACCOUNT_STATEMENT` requires a UUID `accountId`. Customer filtering matches the account's primary customer or an OWNER role and deduplicates matches; nominees and other non-owner roles do not grant ownership.
 
 | Type | Dates and calculation |

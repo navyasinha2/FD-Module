@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Open Fixed Deposit Account</title>
+  <script src="js/theme.js"></script>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
@@ -14,67 +15,58 @@
       <a href="operations.html">Operations</a>
       <a href="reports.html">Reports</a>
     </nav>
-    <h1>Open Fixed Deposit Account</h1>
-    <p class="subtitle">fd-service · POST /fd-accounts</p>
+    <h1>Open a fixed deposit</h1>
+    <p class="subtitle">A fresh start for your savings. Set up your deposit and account holders.</p>
 
     <form id="fd-form" novalidate>
       <fieldset>
-        <legend>Account</legend>
+        <legend>Account details</legend>
+<div class="account-grid">
 
-        <label for="custId">Customer ID *</label>
-        <input type="text" id="custId" name="custId" placeholder="CUST-001" required />
+        <div class="field"><label for="custId">Customer ID *</label><input type="text" id="custId" name="custId" placeholder="CUST-001" required /></div>
 
-        <label for="productCode">Product Code *</label>
-        <input type="text" id="productCode" name="productCode" placeholder="FD-REG" required />
+        <div class="field"><label for="productCode">Product Code *</label><input type="text" id="productCode" name="productCode" placeholder="FD-REG" required /></div>
 
-        <label for="principal">Principal Amount *</label>
-        <input type="number" inputmode="decimal" id="principal" name="principal" min="0.01" step="0.01" required />
+        <div class="field"><label for="principal">Principal Amount *</label><input type="number" inputmode="decimal" id="principal" name="principal" min="0.01" step="0.01" required /></div>
 
-        <label for="tenureMonths">Tenure (months) *</label>
-        <input type="number" id="tenureMonths" name="tenureMonths" min="1" step="1" required />
+        <div class="field"><label for="tenureMonths">Tenure (months) *</label><input type="number" id="tenureMonths" name="tenureMonths" min="1" step="1" required /></div>
 
-        <label for="currencyCode">Currency Code</label>
-        <input type="text" id="currencyCode" name="currencyCode" placeholder="USD" maxlength="3" list="currency-codes" />
+        <div class="field"><label for="currencyCode">Currency Code</label><input type="text" id="currencyCode" name="currencyCode" placeholder="USD" maxlength="3" list="currency-codes" /></div>
 
-        <label for="rateId">Rate ID *</label>
-        <input type="text" id="rateId" name="rateId" placeholder="RATE-12M" maxlength="20" required />
-        <p class="hint">Contracted rate from Product &amp; Pricing. It will fill in from the product code once Group 2's service is live.</p>
+        <div class="field"><label for="rateId">Rate ID *</label><input type="text" id="rateId" name="rateId" placeholder="RATE-12M" maxlength="20" required />
+        <p class="hint">Contracted rate from Product &amp; Pricing. It will fill in from the product code once Group 2's service is live.</p></div>
 
-        <label for="categoryCd">Category Code</label>
-        <input type="text" id="categoryCd" name="categoryCd" placeholder="(optional)" />
+        <div class="field"><label for="categoryCd">Category Code</label><input type="text" id="categoryCd" name="categoryCd" placeholder="(optional)" /></div>
 
-        <label for="interestType">Interest Type</label>
-        <select id="interestType" name="interestType">
+        <div class="field"><label for="interestType">Interest Type</label><select id="interestType" name="interestType">
           <option value="">Use default (Compound)</option>
           <option value="COMPOUND">Compound — interest added to principal</option>
           <option value="SIMPLE">Simple — interest paid out</option>
-        </select>
+        </select></div>
 
-        <label for="compoundingFreq">Compounding Frequency</label>
-        <select id="compoundingFreq" name="compoundingFreq">
+        <div class="field"><label for="compoundingFreq">Compounding Frequency</label><select id="compoundingFreq" name="compoundingFreq">
           <option value="">Use product default</option>
           <option value="MONTHLY">Monthly</option>
           <option value="QUARTERLY">Quarterly</option>
           <option value="HALF_YEARLY">Half-yearly</option>
           <option value="ANNUALLY">Annually</option>
-        </select>
+        </select></div>
 
-        <label for="payoutFreq">Payout Frequency</label>
-        <select id="payoutFreq" name="payoutFreq">
+        <div class="field"><label for="payoutFreq">Payout Frequency</label><select id="payoutFreq" name="payoutFreq">
           <option value="">Use product default</option>
           <option value="ON_MATURITY">On maturity</option>
           <option value="MONTHLY">Monthly</option>
           <option value="QUARTERLY">Quarterly</option>
           <option value="HALF_YEARLY">Half-yearly</option>
           <option value="ANNUALLY">Annually</option>
-        </select>
+        </select></div>
 
-        <label for="maturityInstruction">Maturity Instruction</label>
-        <select id="maturityInstruction" name="maturityInstruction">
+        <div class="field"><label for="maturityInstruction">Maturity Instruction</label><select id="maturityInstruction" name="maturityInstruction">
           <option value="">Use product default</option>
           <option value="PAYOUT">Payout</option>
           <option value="RENEW">Renew</option>
-        </select>
+        </select></div>
+</div>
       </fieldset>
 
       <fieldset>
@@ -93,6 +85,7 @@
       <h2 id="result-title"></h2>
       <pre id="result-body"></pre>
     </section>
+  <aside class="panel deposit-guide" aria-label="Opening a deposit"><div class="guide-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m12 3 8 4v5c0 5-8 9-8 9s-8-4-8-9V7Z"/><path d="m8 12 3 3 5-6"/></svg>A good place to start</div><ol class="guide-steps"><li><strong>Choose your terms</strong><span>Set the amount, currency, tenure, and contracted rate.</span></li><li><strong>Add the account holders</strong><span>Assign an owner and any additional roles for this deposit.</span></li><li><strong>Keep the full picture</strong><span>View interest, maturity, and statements from your workspace.</span></li></ol><div class="guide-footer">Amounts follow each currency’s precision. Demo withholding is applied according to the configured policy.</div></aside>
   <datalist id="currency-codes"><option value="INR"><option value="USD"><option value="JPY"><option value="BHD"><option value="KWD"><option value="EUR"><option value="GBP"></datalist>
 </main>
 
@@ -114,7 +107,8 @@
     </div>
   </template>
 
-  <script src="js/money.js"></script>
+  <script src="js/shell.js"></script>
+<script src="js/money.js"></script>
 <script src="js/api.js"></script>
   <script src="js/app.js"></script>
 </body>

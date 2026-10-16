@@ -2,16 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FD Reports</title><link rel="stylesheet" href="css/styles.css">
+  <title>FD Reports</title><script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 <main class="page wide">
   <nav class="topnav" aria-label="Main navigation"><a href="index.html">Open account</a><a href="withdraw.html">Withdraw FD</a><a href="operations.html">Operations</a><a href="reports.html" aria-current="page">Reports</a></nav>
-  <h1>FD Reports</h1>
-  <p class="subtitle">Portfolio, compliance, and account statements <span id="business-date"></span></p>
+  <h1>Your deposits, in focus.</h1>
+  <p class="subtitle">A clear view of your portfolio, from the big picture to every detail. <span id="business-date"></span></p>
   <p class="hint">Local lab demo. Customer selection is an operations filter. Amounts remain in their original currency.</p>
+  <section aria-label="Portfolio overview">
+    <div class="overview-grid">
+      <article class="overview-card insight-card"><span class="insight-tag">PORTFOLIO OVERVIEW</span><div><h2>Every deposit.<br>One clear picture.</h2><p>Track your balances, explore your activity, and stay a step ahead of maturity.</p></div><a class="insight-arrow" href="#filters-heading" aria-label="Explore report filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></a></article>
+      <article class="overview-card"><div class="card-heading"><h2>Total liability</h2><select id="overview-currency" class="currency-picker" aria-label="Overview currency" disabled><option>—</option></select></div><div class="overview-money" id="overview-liability">—</div><p class="overview-detail" id="overview-compact">Loading your current position…</p><div class="metric-foot"><span class="metric-pill" id="overview-accrued">Accrued interest —</span><span class="metric-pill">Original currency</span></div></article>
+      <article class="overview-card gauge-card"><div class="card-heading"><h2>Active deposits</h2><span class="badge" id="overview-total">— accounts</span></div><div class="gauge"><div class="gauge-ring" id="overview-gauge"></div><div class="gauge-value"><small>OF YOUR PORTFOLIO</small><strong id="overview-share">—</strong></div></div><div class="gauge-caption" id="overview-active">Loading account status</div></article>
+    </div>
+    <div class="analytics-grid">
+      <article class="panel"><div class="panel-head"><h2>Deposit balance over time</h2><span class="chart-key" id="overview-chart-key">Posted balance</span></div><p class="chart-caption">Monthly closing balances · original currency</p><div class="chart-box" id="overview-chart"><p class="chart-empty">Loading portfolio history…</p></div></article>
+      <article class="panel"><div class="panel-head"><h2>Account activity</h2><span class="badge">LIFECYCLE</span></div><ul class="lifecycle-list"><li><span class="lifecycle-name"><i></i>Active</span><strong id="status-active">—</strong></li><li><span class="lifecycle-name"><i></i>Matured &amp; paid</span><strong id="status-matured">—</strong></li><li><span class="lifecycle-name"><i></i>Renewed</span><strong id="status-renewed">—</strong></li><li><span class="lifecycle-name"><i></i>Closed early</span><strong id="status-closed">—</strong></li></ul><p class="hint">Current status across all deposit accounts.</p></article>
+    </div>
+    <p class="overview-status" id="overview-status" role="status">Fetching your portfolio overview…</p>
+  </section>
+  <p class="section-eyebrow">EXPLORE THE DETAILS</p>
   <section class="panel" aria-labelledby="filters-heading">
-    <div class="panel-head"><h2 id="filters-heading">Generate a report</h2></div>
+    <div class="panel-head"><h2 id="filters-heading">Your reports</h2><span class="badge">6 REPORT TYPES</span></div>
     <form id="report-form">
       <div class="inline-form">
         <label for="report-type">Report<select id="report-type">
@@ -55,7 +69,8 @@
     <div id="fx-rates" class="table-wrap"></div>
   </section>
 </main>
+<script src="js/shell.js"></script>
 <script src="js/money.js"></script>
-<script src="js/api.js"></script><script src="js/reports.js"></script>
+<script src="js/api.js"></script><script src="js/reports.js"></script><script src="js/overview.js"></script>
 </body>
 </html>

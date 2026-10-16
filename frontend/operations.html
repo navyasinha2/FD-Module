@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FD Operations Console</title>
+  <script src="js/theme.js"></script>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
@@ -14,11 +15,12 @@
       <a href="operations.html" aria-current="page">Operations</a>
       <a href="reports.html">Reports</a>
     </nav>
-    <h1>FD Operations Console</h1>
-    <p class="subtitle">fd-service · business clock · interest batch · account ledger · GL balances</p>
+    <h1>Operations</h1>
+    <p class="subtitle">Your business clock, account activity, and ledgers in one place.</p>
 
     <div id="global-error" class="errors" role="alert" hidden></div>
 
+    <div class="operations-grid">
     <section class="panel">
       <div class="panel-head">
         <h2>Business clock</h2>
@@ -63,6 +65,7 @@
       </div>
     </section>
 
+    </div>
     <section class="panel">
       <div class="panel-head">
         <h2>Account</h2>
@@ -148,7 +151,8 @@
     </section>
   </main>
 
-  <script src="js/money.js"></script>
+  <script src="js/shell.js"></script>
+<script src="js/money.js"></script>
 <script src="js/api.js"></script>
   <script src="js/ops.js"></script>
 </body>
